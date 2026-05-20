@@ -1,6 +1,5 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { customProperties } from "./custom-property.ts";
 import { update } from "./command/update.ts";
 import { get } from "./command/get.ts";
 import { OctokitGithub } from "./github/github-octokit.ts";
@@ -15,9 +14,8 @@ yargs(hideBin(process.argv))
       yargs
         .positional("property", {
           describe: "property to get",
-          type: "string",
           demandOption: true,
-          choices: customProperties,
+          type: "string",
         })
         .option("o", {
           alias: "org",

@@ -1,13 +1,12 @@
 import { PropertyMapper } from "../map/property-map.ts";
 import type { Github } from "./github.ts";
-import type { CustomProperty } from "../custom-property.ts";
 
 export class CustomPropertyManager {
   constructor(private github: Github) {}
 
   async getCustomProperty(
     org: string,
-    property: CustomProperty,
+    property: string,
   ): Promise<PropertyMapper> {
     // Get all repositories for the organisation
     const repositories = await this.github.getRepositories(org);

@@ -1,5 +1,4 @@
 import type { ArgumentsCamelCase } from "yargs";
-import { CustomProperty } from "../custom-property.ts";
 import type { Github } from "../github/github.ts";
 import fs from "node:fs";
 import { CustomPropertyManager } from "../github/custom-property-manager.ts";
@@ -11,7 +10,7 @@ export const get =
     output,
     org,
   }: ArgumentsCamelCase<{
-    property: CustomProperty;
+    property: string;
     org: string;
     output?: string;
   }>) => {
