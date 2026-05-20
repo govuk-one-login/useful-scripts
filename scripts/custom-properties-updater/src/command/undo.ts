@@ -4,7 +4,7 @@ import type { Github } from "../github/github.ts";
 import { PropertyMapper } from "../map/property-map.ts";
 import fs from "node:fs";
 
-export const update =
+export const undo =
   (github: Github) =>
   async ({
     filename,
@@ -14,5 +14,5 @@ export const update =
     const csvData = fs.readFileSync(filename).toString();
     const map = PropertyMapper.fromCsv(csvData);
 
-    await manager.setCustomProperties(org, map);
+    await manager.undoCustomProperties(org, map);
   };

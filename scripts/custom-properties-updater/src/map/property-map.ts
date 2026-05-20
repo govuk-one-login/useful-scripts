@@ -1,12 +1,12 @@
 import { parse, stringify } from "csv/sync";
 
-type PropertyMap = {
+type PropertyMapping = {
   repository: NonNullable<string>;
   oldValue: NonNullable<string>;
   newValue: NonNullable<string>;
 };
 
-type PropertyMaps = PropertyMap[];
+type PropertyMap = PropertyMapping[];
 
 type PropertyMapCsvRow = {
   repository: NonNullable<string>;
@@ -62,7 +62,7 @@ const isPropertyMapCsv = (mappings: unknown): mappings is PropertyMapCsv => {
 export class PropertyMapper {
   constructor(
     public readonly customPropertyName: string,
-    public readonly data: PropertyMaps = [],
+    public readonly data: PropertyMap = [],
   ) {}
 
   toCsv(): string {
@@ -88,7 +88,7 @@ export class PropertyMapper {
 
     const propertyName = getCustomPropertyNameFromMapCsv(csv[0]);
     const data = csv.map(
-      (row): PropertyMap => ({
+      (row): PropertyMapping => ({
         repository: row.repository,
         oldValue: row[propertyName] || "", // Should never get the empty string because the propertyName _should_ be correct
         newValue: row.newValue,
@@ -99,7 +99,7 @@ export class PropertyMapper {
     return new PropertyMapper(propertyName, data);
   }
 
-  getChanges(): PropertyMaps {
+  getChanges(): PropertyMap {
     return this.data.filter((item) => !!item.newValue);
   }
 }

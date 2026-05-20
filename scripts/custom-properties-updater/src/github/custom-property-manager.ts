@@ -1,4 +1,4 @@
-import { PropertyMapper } from "../map/property-maps.ts";
+import { PropertyMapper } from "../map/property-map.ts";
 import type { Github } from "./github.ts";
 import type { CustomProperty } from "../custom-property.ts";
 
@@ -32,7 +32,7 @@ export class CustomPropertyManager {
     return new PropertyMapper("property", mappings);
   }
 
-  async setCustomProperty(org: string, propertyMapper: PropertyMapper) {
+  async setCustomProperties(org: string, propertyMapper: PropertyMapper) {
     const changes = propertyMapper.getChanges();
 
     await Promise.all(
@@ -43,6 +43,23 @@ export class CustomPropertyManager {
           propertyMapper.customPropertyName,
           change.oldValue,
           change.newValue,
+        );
+      }),
+    );
+  }
+
+  async undoCustomProperties(org: string, propertyMapper: PropertyMapper) {
+    const changes = propertyMapper.getChanges();
+
+    await Promise.all(
+      changes.map(async (change) => {
+        await this.github.setCustomProperty(
+          org,
+          change.repository,
+          propertyMapper.customPropertyName,
+          // These values are reversed for an undo
+          change.newValue,
+          change.oldValue,
         );
       }),
     );

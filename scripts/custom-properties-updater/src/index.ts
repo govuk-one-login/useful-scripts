@@ -42,4 +42,15 @@ yargs(hideBin(process.argv))
       }),
     update(github),
   )
+  .command(
+    "undo [filename]",
+    "undo property changes recently made by a csv file",
+    (yargs) =>
+      yargs.positional("filename", {
+        describe: "filename of the CSV that was used to update the properties you want undone",
+        type: "string",
+        demandOption: true,
+      }),
+    update(github),
+  )
   .parse();

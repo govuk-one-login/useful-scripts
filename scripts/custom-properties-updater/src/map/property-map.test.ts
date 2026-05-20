@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { PropertyMapper } from "./property-maps.ts";
+import { PropertyMapper } from "./property-map.ts";
 
 describe("ProductionAssetsPropertyMap", () => {
   describe("toCsv", () => {
