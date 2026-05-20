@@ -1,0 +1,40 @@
+{
+  "name": "custom-properties-updater",
+  "version": "1.0.0",
+  "description": "Allows you to download, change and update custom properties",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:start": "npm run build && npm start",
+    "watch": "tsc -wp tsconfig.build.json",
+    "start": "node dist/index.js",
+    "format": "prettier --check src",
+    "format:fix": "prettier --write src",
+    "lint": "eslint src",
+    "lint:fix": "eslint --fix src",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "25.9.1",
+    "@types/yargs": "17.0.35",
+    "@vitest/coverage-v8": "4.1.7",
+    "eslint": "10.4.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.6.0",
+    "jiti": "2.7.0",
+    "prettier": "3.8.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.59.4",
+    "vitest": "4.1.7"
+  },
+  "dependencies": {
+    "csv": "6.5.1",
+    "octokit": "5.0.5",
+    "yargs": "18.0.0"
+  }
+}
