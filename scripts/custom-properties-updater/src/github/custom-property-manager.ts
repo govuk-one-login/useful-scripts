@@ -34,9 +34,17 @@ export class CustomPropertyManager {
   async setCustomProperties(org: string, propertyMapper: PropertyMapper) {
     const changes = propertyMapper.getChanges();
 
+    console.log(
+      `Updating custom property ${propertyMapper.customPropertyName}`,
+    );
+
     await Promise.all(
-      changes.map(async (change) => {
-        await this.github.setCustomProperty(
+      changes.map((change) => {
+        console.log(
+          `@${org}/${change.repository} : ${change.oldValue} -> ${change.newValue}`,
+        );
+
+        return this.github.setCustomProperty(
           org,
           change.repository,
           propertyMapper.customPropertyName,
@@ -50,9 +58,15 @@ export class CustomPropertyManager {
   async undoCustomProperties(org: string, propertyMapper: PropertyMapper) {
     const changes = propertyMapper.getChanges();
 
+    console.log(`Undoing custom property ${propertyMapper.customPropertyName}`);
+
     await Promise.all(
-      changes.map(async (change) => {
-        await this.github.setCustomProperty(
+      changes.map((change) => {
+        console.log(
+          `@${org}/${change.repository} : ${change.newValue} -> ${change.oldValue}`,
+        );
+
+        return this.github.setCustomProperty(
           org,
           change.repository,
           propertyMapper.customPropertyName,
