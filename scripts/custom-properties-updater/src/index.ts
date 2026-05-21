@@ -2,6 +2,7 @@ import yargs from "yargs";
 import {hideBin} from "yargs/helpers";
 import {update} from "./command/update.ts";
 import {get} from "./command/get.ts";
+import {undo} from "./command/undo.ts";
 import {OctokitGithub} from "./github/github-octokit.ts";
 
 const github = new OctokitGithub();
@@ -63,6 +64,6 @@ yargs(hideBin(process.argv))
                     describe: "The organisation to scan",
                     type: "string",
                 }),
-        update(github),
+        undo(github),
     )
     .parse();

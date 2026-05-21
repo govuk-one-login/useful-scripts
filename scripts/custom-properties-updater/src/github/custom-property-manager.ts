@@ -28,7 +28,7 @@ export class CustomPropertyManager {
     );
 
     // Turn the array of maps into a collection
-    return new PropertyMapper("property", mappings);
+    return new PropertyMapper(property, mappings);
   }
 
   async setCustomProperties(org: string, propertyMapper: PropertyMapper) {

@@ -31,7 +31,7 @@ It's worth leaving repositories not being changed in the CSV with an empty `newV
 
 Run `npm start update -o <ORG> [filename]` where `[filename]` is the path to the CSV you just edited.
 
-This will then update each repository in turn, but will error if any of the values have changed since the `csv` was 
+This will then update each repository in turn, but will error if any of the values have changed since the `csv` was
 created, possibly indicating an unexpect or unwanted change.
 
 ### Undoing a previous change
@@ -61,7 +61,6 @@ The csv we get should look something like
 
 | repository    | owning-team | newValue |
 |---------------|-------------|----------|
-| dev-tools     | pow         |          |
 | auth-be       | snap        |          |
 | auth-fe       | crackle     |          |
 | auth-infra    | pop         |          |
@@ -71,24 +70,24 @@ The csv we get should look something like
 | content-be    | snap        |          |
 | content-fe    | crackle     |          |
 | content-infra | pop         |          |
+| dev-tools     | pow         |          |
 
 We can then enter the new values. In this case, where we used to have teams split along different disciplines, we're now
 going to make multi, disciplined teams that own whole products. We'll enter the which teams are being updated into the
 `newValue` column
 
-
 | repository    | owning-team | newValue  |
 |---------------|-------------|-----------|
-| dev-tools     | pow         | blossom   |
 | auth-be       | snap        | blossom   |
 | auth-fe       | crackle     | blossom   |
-| auth-infra    | pop         | bubbles   |
+| auth-infra    | pop         | blossom   |
 | account-be    | snap        | bubbles   |
 | account-fe    | crackle     | bubbles   |
-| account-infra | pop         | buttercup |
+| account-infra | pop         | bubbles   |
 | content-be    | snap        | buttercup |
 | content-fe    | crackle     | buttercup |
-| content-infra | pop         |           |
+| content-infra | pop         | buttercup |
+| dev-tools     | pow         |           |
 
 However, the dev-tools team is not changing so we keep that blank, and it won't change.
 
