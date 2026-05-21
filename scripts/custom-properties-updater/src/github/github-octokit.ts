@@ -8,7 +8,9 @@ export class OctokitGithub implements Github {
 
   constructor(github_token: string = process.env.GITHUB_TOKEN ?? "") {
     if (!github_token) {
-      throw new Error("A GitHub token must be provided, visit: https://github.com/settings/personal-access-tokens");
+      throw new Error(
+        "A GitHub token must be provided, visit: https://github.com/settings/personal-access-tokens",
+      );
     }
     const RestOctokit = Octokit.plugin(restEndpointMethods, paginateRest);
     this.#octokit = new RestOctokit({ auth: github_token });
@@ -47,7 +49,7 @@ export class OctokitGithub implements Github {
           (property) => property.property_name === customProperty,
         );
         if (!property) {
-          return '';
+          return "";
         }
 
         if (Array.isArray(property.value)) {
