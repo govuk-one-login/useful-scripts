@@ -9,7 +9,12 @@ type FakeRepository = {
 export type GithubStubData = FakeRepository[];
 
 export class StubGithub implements Github {
-  constructor(public stubData: GithubStubData) {}
+  public stubData: GithubStubData;
+
+  constructor(stubData: GithubStubData) {
+    // Deep copy to prevent contamination, assume typing remains OK after type erasure 🫣
+    this.stubData = JSON.parse(JSON.stringify(stubData));
+  }
 
   async getRepositories(organisation: string): Promise<string[]> {
     return this.stubData
