@@ -7,6 +7,16 @@ Allows you to update custom properties on all repositories across an entire GitH
 Usage
 -----
 
+### GitHub token
+
+You will need to create a GitHub token and have it in the environment as `GITHUB_TOKEN` when you run the script.
+
+Visit [https://github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) to create
+the token.
+
+You should create the token against the organisation you wish to update the custom properties of, and only give it
+Read & Write access to Repository Custom Properties.
+
 ### Get existing custom property values
 
 Use `npm start get -o <ORG> [property]` where `<ORG>` is the name of your organisation, and `[property]` is
