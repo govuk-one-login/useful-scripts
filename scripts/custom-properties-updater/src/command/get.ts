@@ -7,20 +7,22 @@ export const get =
   (github: Github) =>
   async ({
     property,
-    output,
     org,
+    output = 1, // 1 = stdout
   }: ArgumentsCamelCase<{
     property: string;
     org: string;
-    output?: string;
+    output: string | 1;
   }>) => {
     const manager = new CustomPropertyManager(github);
-    const map = await manager.getCustomProperty(org, property);
+    const [errors, map] = await manager.getCustomProperty(org, property);
 
-    // Write the out
-    if (output) {
-      fs.writeFileSync(output, map.toCsv());
-    } else {
-      console.log(map.toCsv());
+    // Log errors
+    if (errors.length > 0) {
+      console.error("One of more errors occured:");
+      errors.forEach((error) => console.error(`- ${error.message}`));
     }
+
+    // Write the csv out
+    fs.writeFileSync(output, map.toCsv());
   };

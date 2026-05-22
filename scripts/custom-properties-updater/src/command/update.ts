@@ -14,5 +14,11 @@ export const update =
     const csvData = fs.readFileSync(filename).toString();
     const map = PropertyMapper.fromCsv(csvData);
 
-    await manager.setCustomProperties(org, map);
+    const errors = await manager.setCustomProperties(org, map);
+
+    // Log errors
+    if (errors.length > 0) {
+      console.error("One of more errors occured:");
+      errors.forEach((error) => console.error(`- ${error.message}`));
+    }
   };

@@ -1,12 +1,12 @@
 import { parse, stringify } from "csv/sync";
 
-type PropertyMapping = {
+export type PropertyMapping = {
   repository: NonNullable<string>;
   oldValue: NonNullable<string>;
   newValue: NonNullable<string>;
 };
 
-type PropertyMap = PropertyMapping[];
+export type PropertyMap = PropertyMapping[];
 
 type PropertyMapCsvRow = {
   repository: NonNullable<string>;

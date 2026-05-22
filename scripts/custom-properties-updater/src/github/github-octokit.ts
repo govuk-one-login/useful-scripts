@@ -58,7 +58,10 @@ export class OctokitGithub implements Github {
         return property.value ?? "";
       })
       .catch((error) => {
-        console.warn(`Failed to fetch alerts for ${repository}:`, error);
+        console.warn(
+          `Failed to fetch any properties for ${repository}:`,
+          error,
+        );
         return "";
       });
   }
@@ -77,7 +80,9 @@ export class OctokitGithub implements Github {
       customProperty,
     );
     if (currentValue !== oldValue) {
-      throw new Error("Custom has changed since data was set, can not update");
+      throw new Error(
+        `Did not update "${customProperty}" in "${repository}". The value had changed, expected "${oldValue}" found "${currentValue}"`,
+      );
     }
 
     // Set the new value:
