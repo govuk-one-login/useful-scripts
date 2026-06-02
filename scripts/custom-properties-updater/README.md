@@ -11,11 +11,13 @@ Usage
 
 You will need to create a GitHub token and have it in the environment as `GITHUB_TOKEN` when you run the script.
 
-Visit [https://github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) to create
-the token.
-
 You should create the token against the organisation you wish to update the custom properties of, and only give it
 Read & Write access to Repository Custom Properties.
+
+**Recommendation:** Tokens should never last longer than you need them. Ideally, set it to only last one day.
+
+Visit [https://github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) to create
+the token.
 
 ### Get existing custom property values
 
