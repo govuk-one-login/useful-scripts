@@ -37,10 +37,8 @@ describe("CustomPropertyManager", () => {
       const github = new StubGithub(stubData);
       const customPropertyManager = new CustomPropertyManager(github);
 
-      const [errors, properties] = await customPropertyManager.getCustomProperty(
-        "org1",
-        "customProp1",
-      );
+      const [errors, properties] =
+        await customPropertyManager.getCustomProperty("org1", "customProp1");
 
       expect(errors).toHaveLength(0);
 
@@ -77,10 +75,8 @@ describe("CustomPropertyManager", () => {
       const propertyChanges = new PropertyMapper("customProp1", newProperties);
       await customPropertyManager.setCustomProperties("org1", propertyChanges);
 
-      const [errors, properties] = await customPropertyManager.getCustomProperty(
-        "org1",
-        "customProp1",
-      );
+      const [errors, properties] =
+        await customPropertyManager.getCustomProperty("org1", "customProp1");
 
       expect(errors).toHaveLength(0);
 
@@ -118,10 +114,8 @@ describe("CustomPropertyManager", () => {
       await customPropertyManager.setCustomProperties("org1", propertyChanges);
       await customPropertyManager.undoCustomProperties("org1", propertyChanges);
 
-      const [errors, properties] = await customPropertyManager.getCustomProperty(
-        "org1",
-        "customProp1",
-      );
+      const [errors, properties] =
+        await customPropertyManager.getCustomProperty("org1", "customProp1");
 
       expect(errors).toHaveLength(0);
 

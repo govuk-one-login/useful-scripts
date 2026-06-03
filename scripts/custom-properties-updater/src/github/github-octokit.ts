@@ -2,14 +2,26 @@ import { Octokit } from "@octokit/core";
 import { restEndpointMethods } from "@octokit/plugin-rest-endpoint-methods";
 import { paginateRest } from "@octokit/plugin-paginate-rest";
 import type { Github } from "./github.ts";
+import { AccessLevel, TokenGenerator } from "../token/token-generator.ts";
 
 export class OctokitGithub implements Github {
   #octokit;
 
   constructor(github_token: string = process.env.GITHUB_TOKEN ?? "") {
     if (!github_token) {
+      const tokenGenerator = new TokenGenerator();
+      tokenGenerator
+        .setName(
+          `Custom property manager ${new Date().toISOString().split("T")[0]}`,
+        )
+        .setDescription(
+          `Allows the custom property manager to read an write custom propertied`,
+        )
+        .setExpiresIn(1)
+        .setPermissions("repository_custom_properties", AccessLevel.write);
+
       throw new Error(
-        "A GitHub token must be provided, visit: https://github.com/settings/personal-access-tokens",
+        `A GitHub token must be provided, visit the following url and set the owner to the org you're going to change: ${tokenGenerator.toUrl()}`,
       );
     }
     const RestOctokit = Octokit.plugin(restEndpointMethods, paginateRest);
