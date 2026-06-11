@@ -673,9 +673,7 @@ main() {
         
         # Get visibility for all repos (needed for both found and missing)
         local visibility
-        local encoded_repo
-        encoded_repo=$(url_encode "$repo")
-        visibility=$(gh_api "/repos/$encoded_repo" | jq -r 'if .private then "private" else "public" end')
+        visibility=$(gh_api "/repos/$repo" | jq -r '.visibility // (if .private then "private" else "public" end)')
         
         local file_links
         file_links=$(search_file_in_repo "$repo" "$FILENAME" "$DEPTH")
