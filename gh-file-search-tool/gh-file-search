@@ -1,0 +1,717 @@
+#!/bin/bash
+
+# Validate and sanitize inputs
+validate_inputs() {
+    # Validate organization name - only allow alphanumeric, dashes, underscores
+    if [[ ! "$ORG" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        echo "Error: Invalid organization name '$ORG'. Only alphanumeric characters, dots, dashes, and underscores allowed." >&2
+        exit 1
+    fi
+    
+    # Validate filename - check for dangerous characters
+    case "$FILENAME" in
+        *\;*|\|*|*\&*|*\$*|*\`*|*\(*|*\)*)
+            echo "Error: Invalid filename '$FILENAME'. Contains potentially dangerous characters." >&2
+            exit 1
+            ;;
+    esac
+    
+    # Validate limit is numeric
+    if [ -n "$LIMIT" ] && ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+        echo "Error: Limit must be a positive integer, got '$LIMIT'" >&2
+        exit 1
+    fi
+}
+
+# Simple progress messages (no animated spinner to avoid output conflicts)
+show_progress() {
+    local message="$1"
+    echo "$message" >&2
+}
+check_dependencies() {
+    local missing=()
+    
+    # Always required
+    if ! command -v curl &> /dev/null; then
+        missing+=("curl")
+    fi
+    
+    # Required for JSON output
+    if [ "$JSON_OUTPUT" = true ] && ! command -v jq &> /dev/null; then
+        missing+=("jq")
+    fi
+    
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo "Error: Missing required dependencies: ${missing[*]}" >&2
+        echo "Please install:" >&2
+        for dep in "${missing[@]}"; do
+            case $dep in
+                "curl") echo "  - curl: https://curl.se/" >&2 ;;
+                "jq") echo "  - jq: https://jqlang.github.io/jq/" >&2 ;;
+            esac
+        done
+        exit 1
+    fi
+}
+
+# Check authentication early
+# Auth checks progress as follows:
+#   - Checks if you get a 401 from api.github.com (note sbx can handle this secret automatically)
+#   - If not, check if there's a local env variable
+#   - If not, check for a persisted token in config
+#   - Otherwise advise the user they will need to create a token, suggest how and permissions required
+check_auth() {
+    local token=""
+    
+    # If --use-gh-cli is specified, use GitHub CLI exclusively
+    if [ "$USE_GH_CLI" = true ]; then
+        if command -v gh &> /dev/null && gh auth status &> /dev/null; then
+            token=$(gh auth token 2>/dev/null)
+            echo "Using gh CLI authentication" >&2
+            set_auth_token "$token"
+            return 0
+        else
+            echo "Error: GitHub CLI not authenticated. Run 'gh auth login'" >&2
+            exit 1
+        fi
+    fi
+    
+    # First: Test if GitHub API is accessible (sbx might handle auth automatically)
+    echo "Testing GitHub API access..." >&2
+    local test_response
+    test_response=$(curl -s https://api.github.com/user 2>/dev/null)
+    if echo "$test_response" | grep -q '"login"'; then
+        echo "GitHub API accessible (sbx network-level auth detected)" >&2
+        set_auth_token "sbx-handled"
+        return 0
+    fi
+    
+    # Second: Check for local environment variable
+    if [ -n "$GH_FILE_SEARCH_TOKEN" ]; then
+        token="$GH_FILE_SEARCH_TOKEN"
+        echo "Using token from GH_FILE_SEARCH_TOKEN environment variable" >&2
+    
+    # Third: Check for persisted token in config file
+    elif [ -f "$HOME/.config/gh-file-search/token" ]; then
+        # Verify file permissions are secure (600)
+        local perms
+        perms=$(stat -f "%A" "$HOME/.config/gh-file-search/token" 2>/dev/null || stat -c "%a" "$HOME/.config/gh-file-search/token" 2>/dev/null)
+        if [ "$perms" != "600" ]; then
+            echo "Warning: Token file has insecure permissions ($perms). Should be 600." >&2
+        fi
+        token=$(cat "$HOME/.config/gh-file-search/token" 2>/dev/null)
+        echo "Using token from config file" >&2
+    
+    # Fourth: Check sbx secrets (fallback, though API test above should catch this)
+    elif command -v sbx &> /dev/null; then
+        local sandbox_name="${SBX_SANDBOX_NAME:-work-useful-scripts}"
+        if sbx secret get "$sandbox_name" github &> /dev/null; then
+            token=$(sbx secret get "$sandbox_name" github)
+            echo "Using token from sbx secrets (sandbox: $sandbox_name, service: github)" >&2
+        fi
+    fi
+    
+    if [ -z "$token" ]; then
+        echo "Error: No GitHub fine-grained personal access token found." >&2
+        echo >&2
+        echo "To create a token:" >&2
+        echo "1. Go to: https://github.com/settings/personal-access-tokens/new" >&2
+        echo "2. Fill in the form:" >&2
+        echo "   • Token name: gh-file-search-$(date +%Y%m%d)" >&2
+        echo "   • Description: File search tool for your organization" >&2
+        echo "   • Resource owner: [select your target organization]" >&2
+        echo "   • Expiration: 7 days" >&2
+        echo "   • Repository access: All repositories" >&2
+        echo "3. Set Repository permissions:" >&2
+        echo "   • Contents: Read" >&2
+        echo "   • Metadata: Read" >&2
+        echo "   • Custom properties: Read (for --custom-property filtering)" >&2
+        echo "4. Generate token and set:" >&2
+        echo "   export GH_FILE_SEARCH_TOKEN=\"your_token_here\"" >&2
+        echo >&2
+        echo "Or use GitHub CLI with: --use-gh-cli flag" >&2
+        exit 1
+    fi
+    
+    # Store token securely for gh_api function
+    set_auth_token "$token"
+}
+
+# Clean up sensitive data on exit
+cleanup_secrets() {
+    unset _GH_API_TOKEN 2>/dev/null || true
+}
+
+# Set cleanup trap
+trap cleanup_secrets EXIT INT TERM
+
+# Get GitHub authentication token (without persisting in global env)
+get_auth_token() {
+    echo "$_GH_API_TOKEN"
+}
+
+# Set token securely (minimize exposure time)
+set_auth_token() {
+    local token="$1"
+    _GH_API_TOKEN="$token"
+}
+
+# Sanitize API responses to prevent information disclosure
+sanitize_api_response() {
+    local response="$1"
+    # Remove potential sensitive information from error responses
+    echo "$response" | sed 's/"token"[^,]*/"token":"[REDACTED]"/g' | head -c 200
+}
+
+# URL encode function to prevent injection
+url_encode() {
+    local string="$1"
+    local encoded=""
+    local pos char
+    
+    for (( pos=0; pos<${#string}; pos++ )); do
+        char=${string:$pos:1}
+        case $char in
+            [a-zA-Z0-9.~_-]) encoded+="$char" ;;
+            *) printf -v encoded '%s%%%02X' "$encoded" "'$char" ;;
+        esac
+    done
+    
+    echo "$encoded"
+}
+
+# Make authenticated GitHub API call with rate limit handling
+gh_api() {
+    local endpoint="$1"
+    local token
+    token=$(get_auth_token)
+    
+    local response http_code
+    
+    if [ "$token" = "sbx-handled" ]; then
+        # sbx is handling auth at network level, no need for auth headers
+        response=$(curl --max-time 30 --connect-timeout 10 -s -w "%{http_code}" \
+             -H "Accept: application/vnd.github+json" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             "https://api.github.com$endpoint")
+    else
+        # Use explicit token
+        response=$(curl --max-time 30 --connect-timeout 10 -s -w "%{http_code}" \
+             -H "Authorization: Bearer $token" \
+             -H "Accept: application/vnd.github+json" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             "https://api.github.com$endpoint")
+    fi
+    
+    # Extract HTTP code and body
+    http_code="${response: -3}"
+    response="${response%???}"
+    
+    # Handle rate limiting
+    if [ "$http_code" = "403" ] && echo "$response" | grep -q "rate limit"; then
+        echo "Rate limit exceeded. Waiting 60 seconds..." >&2
+        sleep 60
+        # Retry once
+        gh_api "$endpoint"
+        return
+    fi
+    
+    echo "$response"
+}
+
+# Print usage information
+usage() {
+    cat << EOF
+Usage: $0 FILENAME --org ORG [OPTIONS]
+
+Search for files across GitHub organization repositories.
+
+Arguments:
+    FILENAME                File to search for
+
+Options:
+    --org ORG              GitHub organization name (required)
+    --depth DEPTH          Search depth: root_only, recursive (default: root_only)
+    --visibility LEVEL     Filter by repository visibility (private|public|internal)
+    --custom-property KEY=VALUE  Filter by custom property (can be used multiple times)
+    --limit N              Limit number of repositories to process
+    --json                 Output results as JSON
+    --output FILE          Write JSON results to file (implies --json)
+    --use-gh-cli           Use GitHub CLI authentication instead of fine-grained token
+    --debug                Show debug information
+    --help                 Show this help message
+
+Examples:
+    $0 README.md --org my-org
+    $0 .tsconfig --org my-org --depth recursive --visibility private --limit 10
+    $0 dependabot.yml --org my-org --custom-property team=platform --json
+    $0 README.md --org my-org --output results.json
+    $0 README.md --org my-org --use-gh-cli
+EOF
+}
+
+# Parse command line arguments
+parse_args() {
+    FILENAME=""
+    ORG=""
+    DEPTH="root_only"
+    VISIBILITY=""
+    CUSTOM_PROPERTIES=()
+    LIMIT=""
+    JSON_OUTPUT=false
+    USE_GH_CLI=false
+    DEBUG=false
+    OUTPUT_FILE=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --org)
+                ORG="$2"
+                shift 2
+                ;;
+            --depth)
+                case "$2" in
+                    root_only|recursive)
+                        DEPTH="$2"
+                        ;;
+                    *)
+                        echo "Error: Invalid depth '$2'. Use 'root_only' or 'recursive'" >&2
+                        exit 1
+                        ;;
+                esac
+                shift 2
+                ;;
+            --visibility)
+                VISIBILITY="$2"
+                shift 2
+                ;;
+            --custom-property)
+                CUSTOM_PROPERTIES+=("$2")
+                shift 2
+                ;;
+            --limit)
+                LIMIT="$2"
+                shift 2
+                ;;
+            --json)
+                JSON_OUTPUT=true
+                shift
+                ;;
+            --output|-o)
+                OUTPUT_FILE="$2"
+                JSON_OUTPUT=true  # Implies --json
+                shift 2
+                ;;
+            --use-gh-cli)
+                USE_GH_CLI=true
+                shift
+                ;;
+            --debug)
+                DEBUG=true
+                shift
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            -*)
+                echo "Error: Unknown option $1" >&2
+                usage >&2
+                exit 1
+                ;;
+            *)
+                if [ -z "$FILENAME" ]; then
+                    FILENAME="$1"
+                else
+                    echo "Error: Unexpected argument $1" >&2
+                    usage >&2
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [ -z "$FILENAME" ] || [ -z "$ORG" ]; then
+        echo "Error: FILENAME and --org are required" >&2
+        usage >&2
+        exit 1
+    fi
+}
+
+# Get filtered repositories
+get_repositories() {
+    show_progress "Fetching repositories from organization '$ORG'..."
+    
+    # URL encode the organization name for safety
+    local encoded_org
+    encoded_org=$(url_encode "$ORG")
+    
+    # Test org access first
+    local org_info
+    org_info=$(gh_api "/orgs/$encoded_org" 2>/dev/null)
+    local api_status=$?
+    
+    if [ "$DEBUG" = true ]; then
+        echo "API response for /orgs/$encoded_org: HTTP status $api_status" >&2
+        echo "Response body: $(sanitize_api_response "$org_info")" >&2
+    fi
+    
+    if [ $api_status -ne 0 ] || [ -z "$org_info" ] || echo "$org_info" | grep -q '"message"'; then
+        echo "Error: Cannot access organization '$ORG'." >&2
+        
+        if echo "$org_info" | grep -q '"Bad credentials"'; then
+            echo >&2
+            echo "Your GitHub token is invalid or expired." >&2
+            echo >&2
+            echo "To create a new fine-grained token:" >&2
+            echo "1. Go to: https://github.com/settings/personal-access-tokens/new" >&2
+            echo "2. Fill in the form:" >&2
+            echo "   • Token name: gh-file-search-$(date +%Y%m%d)" >&2
+            echo "   • Description: File search tool for $ORG organization" >&2
+            echo "   • Resource owner: $ORG" >&2
+            echo "   • Expiration: 7 days" >&2
+            echo "   • Repository access: All repositories" >&2
+            echo "3. Set Repository permissions:" >&2
+            echo "   • Contents: Read" >&2
+            echo "   • Metadata: Read" >&2
+            echo "   • Custom properties: Read (for --custom-property filtering)" >&2
+            echo "4. Generate token and replace the old one:" >&2
+            echo "   export GH_FILE_SEARCH_TOKEN=\"your_new_token_here\"" >&2
+            echo >&2
+            echo "To check for existing tokens in your environment:" >&2
+            echo "   env | grep GH_FILE_SEARCH_TOKEN | wc -l  # Should return 1 if set" >&2
+            echo "   test -f ~/.config/gh-file-search/token && echo 'Config file exists' || echo 'No config file'" >&2
+            echo "   command -v sbx >/dev/null && echo 'sbx available' || echo 'No sbx command'" >&2
+        else
+            echo "Possible issues:" >&2
+            echo "  - Organization name '$ORG' is incorrect" >&2
+            echo "  - Token doesn't have access to this organization" >&2
+            echo "  - Organization doesn't allow fine-grained tokens" >&2
+            echo "  - Token needs approval from organization admins" >&2
+        fi
+        
+        if [ "$DEBUG" = true ]; then
+            echo >&2
+            echo "Sanitized API Response: $(sanitize_api_response "$org_info")" >&2
+        fi
+        
+        exit 1
+    fi
+    
+    # Get all repositories with pagination
+    local page=1
+    local all_repos=""
+    
+    while true; do
+        local repos_page
+        repos_page=$(gh_api "/orgs/$encoded_org/repos?per_page=100&page=$page")
+        
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to fetch repositories from organization '$ORG'" >&2
+            exit 1
+        fi
+        
+        local repo_names
+        repo_names=$(echo "$repos_page" | jq -r '.[].full_name' 2>/dev/null)
+        
+        # Break if no more repos
+        if [ -z "$repo_names" ] || [ "$repo_names" = "null" ]; then
+            break
+        fi
+        
+        all_repos="${all_repos}${repo_names}\n"
+        ((page++))
+        
+        # Safety check to prevent infinite loops
+        if [ $page -gt 50 ]; then
+            echo "Warning: Stopped at 5000 repositories (50 pages)" >&2
+            break
+        fi
+    done
+    
+    if [ -z "$all_repos" ]; then
+        echo "No repositories found in organization '$ORG'" >&2
+        exit 1
+    fi
+    
+    echo "Found $(echo -e "$all_repos" | grep -c .) repositories total" >&2
+    
+    local filtered_repos=""
+    
+    while IFS= read -r repo; do
+        [ -z "$repo" ] && continue
+        
+        # Filter by visibility if specified
+        if [ -n "$VISIBILITY" ]; then
+            local repo_info
+            repo_info=$(gh_api "/repos/$repo" 2>/dev/null)
+            if [ $? -ne 0 ]; then
+                echo "Warning: Could not access repository $repo, skipping..." >&2
+                continue
+            fi
+            
+            local is_private
+            is_private=$(echo "$repo_info" | jq -r '.private' 2>/dev/null)
+            
+            case $VISIBILITY in
+                private) [ "$is_private" != "true" ] && continue ;;
+                public) [ "$is_private" = "true" ] && continue ;;
+                internal) continue ;; # Skip internal for now
+            esac
+        fi
+        
+        filtered_repos="${filtered_repos}${repo}\n"
+    done <<< "$all_repos"
+    
+    if [ -n "$LIMIT" ]; then
+        echo -e "$filtered_repos" | head -n "$LIMIT"
+    else
+        echo -e "$filtered_repos"
+    fi
+}
+
+# Search for file in repository
+search_file_in_repo() {
+    local repo="$1"
+    local filename="$2" 
+    local depth="$3"
+    
+    local encoded_repo encoded_filename
+    encoded_repo=$(url_encode "$repo")
+    encoded_filename=$(url_encode "$filename")
+    
+    local matches=()
+    
+    if [ "$depth" = "root_only" ]; then
+        # Check root directory only
+        if gh_api "/repos/$encoded_repo/contents/$encoded_filename" | jq -e '.name' &> /dev/null; then
+            matches+=("https://github.com/$repo/blob/main/$filename")
+        fi
+    else
+        # Recursive search - find all matches
+        local files
+        files=$(gh_api "/repos/$encoded_repo/git/trees/HEAD?recursive=1" | jq -r '.tree[] | select(.type=="blob") | .path')
+        
+        while IFS= read -r file_path; do
+            if [[ "$(basename "$file_path")" == "$filename" ]]; then
+                matches+=("https://github.com/$repo/blob/main/$file_path")
+            fi
+        done <<< "$files"
+    fi
+    
+    # Return all matches, one per line
+    printf '%s\n' "${matches[@]}"
+}
+
+# Search for file in repository
+search_file_in_repo() {
+    local repo="$1"
+    local filename="$2"
+    local root_only="$3"
+    
+    if [ "$root_only" = true ]; then
+        # Check root directory only
+        if gh api "repos/$repo/contents/$filename" &> /dev/null; then
+            echo "https://github.com/$repo/blob/main/$filename"
+        fi
+    else
+        # Recursive search - get all files and filter
+        local files
+        files=$(gh api "repos/$repo/git/trees/HEAD?recursive=1" --jq '.tree[] | select(.type=="blob") | .path')
+        
+        while IFS= read -r file_path; do
+            if [[ "$(basename "$file_path")" == "$filename" ]]; then
+                echo "https://github.com/$repo/blob/main/$file_path"
+                return
+            fi
+        done <<< "$files"
+    fi
+}
+
+# Format missing files table
+format_missing_table() {
+    local -n repos_ref=$1
+    local -n visibility_ref=$2
+    
+    if [ ${#repos_ref[@]} -eq 0 ]; then
+        return
+    fi
+    
+    echo
+    echo "Repositories missing $FILENAME"
+    echo
+    
+    # Calculate max widths
+    local max_repo_width=10
+    local max_visibility_width=10
+    
+    for i in "${!repos_ref[@]}"; do
+        local repo_name="${repos_ref[$i]#$ORG/}"  # Remove org prefix
+        [ ${#repo_name} -gt $max_repo_width ] && max_repo_width=${#repo_name}
+        [ ${#visibility_ref[$i]} -gt $max_visibility_width ] && max_visibility_width=${#visibility_ref[$i]}
+    done
+    
+    # Add padding
+    ((max_repo_width += 2))
+    ((max_visibility_width += 2))
+    
+    # Print header
+    printf "%-*s %-*s %s\n" "$max_repo_width" "REPOSITORY" "$max_visibility_width" "VISIBILITY" "REPO LINK"
+    
+    # Print results
+    for i in "${!repos_ref[@]}"; do
+        local repo_name="${repos_ref[$i]#$ORG/}"  # Remove org prefix
+        local repo_link="https://github.com/${repos_ref[$i]}"
+        printf "%-*s %-*s %s\n" "$max_repo_width" "$repo_name" "$max_visibility_width" "${visibility_ref[$i]}" "$repo_link"
+    done
+    
+    echo
+    echo "Missing from ${#repos_ref[@]} repositories"
+}
+
+# Format output as table using separate arrays
+format_table_separate_arrays() {
+    local -n repos_ref=$1
+    local -n visibility_ref=$2
+    local -n links_ref=$3
+    
+    echo "File Search Results for $ORG"
+    echo
+    
+    # Calculate max widths
+    local max_repo_width=10
+    local max_visibility_width=10
+    
+    for i in "${!repos_ref[@]}"; do
+        local repo_name="${repos_ref[$i]#$ORG/}"  # Remove org prefix
+        [ ${#repo_name} -gt $max_repo_width ] && max_repo_width=${#repo_name}
+        [ ${#visibility_ref[$i]} -gt $max_visibility_width ] && max_visibility_width=${#visibility_ref[$i]}
+    done
+    
+    # Add padding
+    ((max_repo_width += 2))
+    ((max_visibility_width += 2))
+    
+    # Print header
+    printf "%-*s %-*s %s\n" "$max_repo_width" "REPOSITORY" "$max_visibility_width" "VISIBILITY" "FILE LINKS"
+    
+    # Print results
+    for i in "${!repos_ref[@]}"; do
+        local repo_name="${repos_ref[$i]#$ORG/}"  # Remove org prefix
+        printf "%-*s %-*s %s\n" "$max_repo_width" "$repo_name" "$max_visibility_width" "${visibility_ref[$i]}" "${links_ref[$i]}"
+    done
+    
+    echo
+    echo "Found ${#repos_ref[@]} files"
+}
+
+# Main execution
+main() {
+    parse_args "$@"
+    validate_inputs
+    check_dependencies
+    check_auth
+    
+    local repos
+    repos=$(get_repositories)
+    
+    local repo_count
+    repo_count=$(echo "$repos" | wc -l)
+    echo "Processing $repo_count repositories..." >&2
+    
+    local results_repos=()
+    local results_visibility=()
+    local results_links=()
+    local missing_repos=()
+    local missing_visibility=()
+    local json_array="[]"
+    local json_missing_array="[]"
+    local processed=0
+    
+    while IFS= read -r repo; do
+        [ -z "$repo" ] && continue
+        
+        ((processed++))
+        show_progress "Searching repository $processed/$repo_count: $repo"
+        
+        # Get visibility for all repos (needed for both found and missing)
+        local visibility
+        local encoded_repo
+        encoded_repo=$(url_encode "$repo")
+        visibility=$(gh_api "/repos/$encoded_repo" | jq -r 'if .private then "private" else "public" end')
+        
+        local file_links
+        file_links=$(search_file_in_repo "$repo" "$FILENAME" "$DEPTH")
+        
+        if [ -n "$file_links" ]; then
+            # Repository has the file(s)
+            # Convert newline-separated links to array
+            local links_array=()
+            while IFS= read -r link; do
+                [ -n "$link" ] && links_array+=("$link")
+            done <<< "$file_links"
+            
+            if [ "$JSON_OUTPUT" = true ]; then
+                local entry
+                entry=$(jq -n \
+                    --arg repo "$repo" \
+                    --arg visibility "$visibility" \
+                    --argjson links "$(printf '%s\n' "${links_array[@]}" | jq -R . | jq -s .)" \
+                    '{repository: $repo, visibility: $visibility, file_links: $links, custom_properties: {}}')
+                json_array=$(echo "$json_array" | jq ". += [$entry]")
+            else
+                # Join links with <br> for table display
+                local joined_links
+                joined_links=$(IFS='<br>'; echo "${links_array[*]}")
+                
+                results_repos+=("$repo")
+                results_visibility+=("$visibility")
+                results_links+=("$joined_links")
+            fi
+        else
+            # Repository doesn't have the file
+            missing_repos+=("$repo")
+            missing_visibility+=("$visibility")
+            
+            if [ "$JSON_OUTPUT" = true ]; then
+                local missing_entry
+                missing_entry=$(jq -n \
+                    --arg repo "$repo" \
+                    --arg visibility "$visibility" \
+                    '{repository: $repo, visibility: $visibility, repo_link: "https://github.com/\($repo)", custom_properties: {}}')
+                json_missing_array=$(echo "$json_missing_array" | jq ". += [$missing_entry]")
+            fi
+        fi
+    done <<< "$repos"
+    
+    echo "Completed processing $processed repositories." >&2
+    echo >&2
+    
+    if [ "$JSON_OUTPUT" = true ]; then
+        # Combine found and missing results into single JSON object
+        local combined_json
+        combined_json=$(jq -n \
+            --argjson found "$json_array" \
+            --argjson missing "$json_missing_array" \
+            '{repositories_with_file: $found, repositories_missing_file: $missing}')
+        
+        if [ -n "$OUTPUT_FILE" ]; then
+            echo "$combined_json" | jq . > "$OUTPUT_FILE"
+            echo "Results written to $OUTPUT_FILE" >&2
+        else
+            echo "$combined_json" | jq .
+        fi
+    else
+        if [ ${#results_repos[@]} -gt 0 ]; then
+            format_table_separate_arrays results_repos results_visibility results_links
+        else
+            echo "No files found matching '$FILENAME'"
+        fi
+        
+        # Always show missing files table (even if no found files)
+        format_missing_table missing_repos missing_visibility
+    fi
+}
+
+main "$@"
