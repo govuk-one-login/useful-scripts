@@ -399,13 +399,76 @@ get_repositories() {
         exit 1
     fi
     
-    # Get all repositories with pagination
+    # If custom properties are specified, use the properties/values endpoint with repository_query
+    if [ ${#CUSTOM_PROPERTIES[@]} -gt 0 ]; then
+        local query_parts=()
+        for prop in "${CUSTOM_PROPERTIES[@]}"; do
+            local key="${prop%%=*}"
+            local value="${prop#*=}"
+            query_parts+=("props.${key}:${value}")
+        done
+        if [ -n "$VISIBILITY" ]; then
+            query_parts+=("is:${VISIBILITY}")
+        fi
+
+        local query_string="${query_parts[*]}"
+        local encoded_query
+        encoded_query=$(url_encode "$query_string")
+
+        local page=1
+        local all_repos=""
+
+        while true; do
+            local repos_page
+            repos_page=$(gh_api "/orgs/$encoded_org/properties/values?per_page=100&page=$page&repository_query=$encoded_query")
+
+            if [ $? -ne 0 ]; then
+                echo "Error: Failed to fetch repositories from organization '$ORG'" >&2
+                exit 1
+            fi
+
+            local repo_names
+            repo_names=$(echo "$repos_page" | jq -r '.[].repository_full_name' 2>/dev/null)
+
+            if [ -z "$repo_names" ] || [ "$repo_names" = "null" ]; then
+                break
+            fi
+
+            all_repos="${all_repos}${repo_names}\n"
+            ((page++))
+
+            if [ $page -gt 50 ]; then
+                echo "Warning: Stopped at 5000 repositories (50 pages)" >&2
+                break
+            fi
+        done
+
+        if [ -z "$all_repos" ]; then
+            echo "No repositories found matching custom property filter in '$ORG'" >&2
+            exit 1
+        fi
+
+        echo "Found $(echo -e "$all_repos" | grep -c .) repositories matching filter" >&2
+
+        if [ -n "$LIMIT" ]; then
+            echo -e "$all_repos" | grep -v '^$' | head -n "$LIMIT"
+        else
+            echo -e "$all_repos" | grep -v '^$'
+        fi
+        return
+    fi
+    
+    # No custom properties - fetch all repos with optional visibility filter
     local page=1
     local all_repos=""
+    local visibility_param=""
+    if [ -n "$VISIBILITY" ]; then
+        visibility_param="&type=$VISIBILITY"
+    fi
     
     while true; do
         local repos_page
-        repos_page=$(gh_api "/orgs/$encoded_org/repos?per_page=100&page=$page")
+        repos_page=$(gh_api "/orgs/$encoded_org/repos?per_page=100&page=$page${visibility_param}")
         
         if [ $? -ne 0 ]; then
             echo "Error: Failed to fetch repositories from organization '$ORG'" >&2
@@ -437,37 +500,10 @@ get_repositories() {
     
     echo "Found $(echo -e "$all_repos" | grep -c .) repositories total" >&2
     
-    local filtered_repos=""
-    
-    while IFS= read -r repo; do
-        [ -z "$repo" ] && continue
-        
-        # Filter by visibility if specified
-        if [ -n "$VISIBILITY" ]; then
-            local repo_info
-            repo_info=$(gh_api "/repos/$repo" 2>/dev/null)
-            if [ $? -ne 0 ]; then
-                echo "Warning: Could not access repository $repo, skipping..." >&2
-                continue
-            fi
-            
-            local is_private
-            is_private=$(echo "$repo_info" | jq -r '.private' 2>/dev/null)
-            
-            case $VISIBILITY in
-                private) [ "$is_private" != "true" ] && continue ;;
-                public) [ "$is_private" = "true" ] && continue ;;
-                internal) continue ;; # Skip internal for now
-            esac
-        fi
-        
-        filtered_repos="${filtered_repos}${repo}\n"
-    done <<< "$all_repos"
-    
     if [ -n "$LIMIT" ]; then
-        echo -e "$filtered_repos" | head -n "$LIMIT"
+        echo -e "$all_repos" | grep -v '^$' | head -n "$LIMIT"
     else
-        echo -e "$filtered_repos"
+        echo -e "$all_repos" | grep -v '^$'
     fi
 }
 
