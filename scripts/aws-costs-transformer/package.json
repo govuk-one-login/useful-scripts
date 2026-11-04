@@ -1,0 +1,31 @@
+{
+    "name": "aws-costs",
+    "version": "0.0.1",
+    "description": "Lets you split AWS costs by environment",
+    "license": "ISC",
+    "author": "",
+    "type": "module",
+    "main": "index.js",
+    "scripts": {
+        "test": "vitest run --coverage",
+        "test:watch": "vitest",
+        "run": "node aws-costs.ts",
+        "lint": "eslint src"
+    },
+    "devDependencies": {
+        "@eslint/js": "10.0.1",
+        "@types/node": "25.9.1",
+        "@types/yargs": "17.0.35",
+        "@vitest/coverage-v8": "4.1.7",
+        "eslint": "10.4.0",
+        "eslint-config-prettier": "10.1.8",
+        "globals": "17.6.0",
+        "prettier": "3.8.3",
+        "typescript": "6.0.3",
+        "typescript-eslint": "8.59.4",
+        "vitest": "4.1.7"
+    },
+    "dependencies": {
+        "yargs": "18.0.0"
+    }
+}
